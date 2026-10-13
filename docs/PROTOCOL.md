@@ -358,6 +358,17 @@ video/FPGA events (64–67, 139, 141–143, 152, 155–157). Firmware updates us
 `SoftwareUpdateMeta` (135) → `SoftwareUpdateData` (137, 65523-byte chunks) →
 `SoftwareUpdateComplete` (138).
 
+Upload-channel staging semantics (verified live 2026-10-13): a
+`SoftwareUpdateData` chunk **shorter than 65523 bytes is treated as the
+final chunk** — the base finalizes staging and validates the content,
+rejecting garbage with a silent `Disconnect` (tag 0). Full-size chunks are
+Ack'd and the transfer stays open. The `FileName` from the meta is never
+used as the write path (EISDIR/ENOENT oracles Ack like any other name),
+and the read channel's meta reply uses `PacketCount` = number of *full*
+chunks with one extra final chunk of `FinalPacketSize` bytes
+(`count=0, final=N` → a single N-byte chunk 0). See
+[SECURITY_ANALYSIS.md](SECURITY_ANALYSIS.md) §6.7.
+
 ### Base → Head routing (dynamically verified)
 
 The base acts as a router for the control protocol: packets sent on the base
