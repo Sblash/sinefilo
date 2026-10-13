@@ -645,6 +645,32 @@ authorized_keys route is closed. The write primitives reachable from the
 control protocol remain: the (validated) config setters and the update
 pipeline's fixed staging path.
 
+### 6.8 Update-package tar traversal — tried, disproven (2026-10-13)
+
+Follow-up question: can anything be *executed* (or written) from `/tmp`?
+No `/tmp` consumer executes files (boot scripts live in the initramfs;
+`/tmp/boot_dmesg` is read by the report generator only), and the one
+consumer with teeth — the update pipeline, which *does* unpack a staged
+archive — was tested for extraction-before-signature-check:
+
+- A structurally correct unsigned package (correct member names and
+  `base/head_BOOT.BIN` entry sizes, hash-correct `SHA1SUMS`, garbage
+  512-byte `SHA1SUMS.SIG`) carrying tar **path-traversal members**
+  (`../../../root/.ssh/authorized_keys`, absolute) and **symlink
+  members** (`d1 -> /root/.ssh` + `d1/authorized_keys`, a variant that
+  survives leading-`..` stripping) was uploaded to completion.
+  `scripts/update_traversal_probe.py` is the executable record.
+- Result: no traversal/symlink write happened (SSH login stays
+  `Permission denied (publickey)`; no marker in a subsequent report's
+  `df`), and the finalize `Disconnect` arrives **0.06 s** after the last
+  chunk even for a 119 MB (uncompressed) package — the device never
+  gunzips, extracts or hashes unsigned content. The RSA-4096 gate over
+  `SHA1SUMS` runs first; the "Unpacking update..." phase is reachable
+  only for properly signed packages. No journal trace of validation.
+- Consequence: the update channel ends at the same signature wall as
+  secure boot; tar-extraction attacks (traversal, symlink, arbitrary
+  write during unpack) are not reachable without the vendor signing key.
+
 ## 7. What remains for a future authorized assessment
 
 - **VirtualHere server (7575, paired state) — now the primary shell-access
