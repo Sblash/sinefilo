@@ -248,6 +248,55 @@ a client that performs hello -> 9.
   for a native Linux client/server; the remaining unknown is the
   device-USE flow (USB data tunneling after a client attaches a device).
 
+### 1f. Base hub fuzzing campaign (2026-10-13, paired state, live)
+
+Target: the base's VirtualHere hub, reached unauthenticated on TCP 7575.
+Corpus: 196 structured cases (envelope/len/hello/type/stateful) first run
+locally against official vhusbd64u 4.8.8 (0 crashes, robust baseline),
+then against the base. Key findings:
+
+1. **Hub identity**: the VH hub runs *inside* `/usr/bin/imr_controller`
+   (journal lines `Hub 1: The interface to the PC(0)/HMD(2) ...`; no
+   separate process; killing the hub never touched the 34566 control
+   server; two `imr_controller base` processes in the process tree are
+   the controller and its helper, both surviving).
+2. **Crash surface (DoS, unauthenticated)**: VH envelopes with declared
+   payload lengths 5..33 with zero content reset the connection handler
+   (RST); a payload `[01][00 81][garbage]` takes the whole listener down
+   for a while; ~40 accumulated decode failures leak a resource in the
+   process until the support-report generator fails with `Failed to
+   open /tmp/support-report.zip` and finally the whole read channel goes
+   silent. Recovery: `Setup.Reboot` only. The local 4.8.8 server
+   survives all of it.
+3. **Mechanism**: graceful. No kernel segfault lines, no systemd
+   restarts, stable PID — every kill is a caught C++ exception
+   (journald shows `Hub 1: X message decode failed from 0` warnings for
+   some inputs). **No memory-corruption evidence anywhere**; the message
+   layer is exception-safe, which closes the quick-RCE hope for the hub.
+4. **Control-protocol frame parsing inside the hub**: well-formed
+   control frames `[src][dst][seq][opts][len]` sent as VH payloads are
+   fully parsed by the hub (it echoes seq/opts/len back inside its
+   type-1 hub-description reply), but are **not forwarded to the
+   control dispatcher** — no execution, no status/version replies, no
+   dispatch journal entries. The hub's own protobuf decode attempts
+   surface as `SoftwareUpdateComplete message decode failed` warnings
+   regardless of content (possibly a vendor logging bug in the
+   warning template).
+5. **Hello dialect**: the base answers the standard client hello with
+   a type-1 hub description (753 B, `IMRNext (2a3613f8c0a2)`, hostname
+   `imr-nofio1`, `wlp1s0`), then streams its type-16 device records to
+   any peer — full enumeration with zero authentication, version tail
+   of client 6.0.3 accepted.
+6. Remaining unexplored: the device-USE flow (USB descriptor/URB
+   tunneling after a client attaches a device) — the deepest hub parser
+   and the classic USB/IP RCE surface. Requires a real-client MITM
+   capture against the base (client binary already unpacked at
+   `/tmp/vhclient_unpacked`; `vhci_hcd` loads on the host).
+
+Artifacts: `/tmp/vh_fuzz_local.py`, `/tmp/vh_fuzz_base.py`,
+`/tmp/vh_char.py`, `/tmp/vh_ctype_probe2.py`, `/tmp/vh_tunnel_exec.py`
+(session scratch; the reusable ones are committed under `scripts/`).
+
 ## 2. Software inventory (versions confirmed on the device)
 
 | Component | Version | Source |
