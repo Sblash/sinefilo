@@ -1,9 +1,5 @@
 # Security Analysis — TCP/IP attack surface of the Nofio base
 
-*Date: October 7, 2026 (passive analysis) — updated October 7, 2026 (active assessment)*
-*Scope: vulnerability analysis of the Nofio base station reachable over its
-USB network (192.168.3.0/24), with a focus on RCE potential.*
-
 > **Rules of engagement:** the October 7 passive pass used read-only
 > operations only. The same-day **active assessment** was explicitly
 > authorized by the owner (their own hardware): protocol fuzzing
@@ -120,6 +116,12 @@ through base routing (`--target head`, documented in PROTOCOL.md); port
 
 ## 1c. VirtualHere (7575) recon (2026-10-07, live server)
 
+> **Note (2026-11): the VirtualHere research line is retired.** The tooling
+> (`scripts/vh_*.py`) and the WiFi-6E probe (`scripts/wifi_probe_nofio.sh`)
+> have been removed from `scripts/`; the raw device-USE capture is kept at
+> `miscellaneous/vh-useflow-capture-2026-10-13.bin`. The findings below are
+> retained for reference — inline references to the removed scripts are stale.
+
 - **Unauthenticated advertisement**: any TCP peer on 192.168.3.0/24 receives
   the full USB device tree of the paired headset: 580-byte device records
   (4 per cycle: Index HMD LHR-1C2256EF, Valve VR Radio 87C2D0238F-RYB,
@@ -151,7 +153,7 @@ from the original Windows utility, or both.
 
 By running the official Linux client 6.0.3 (needs `vhci_hcd` kernel module,
 loaded by the user on the host) against our mock server
-(`scripts/vh_mock_server.py`, replaying the advertisement captured from the
+(`vh_mock_server.py`, replaying the advertisement captured from the
 base), we captured the client->server side of the protocol (17 messages,
 2 connection cycles). Framing confirmed in BOTH directions:
 
@@ -187,8 +189,8 @@ and hostname upon connection, unauthenticated, before any device use.
 
 Method: ran the official Linux client 6.0.3 against the official Linux
 server v4.8.8 through an iptables-redirected MITM proxy
-(`scripts/vh_mitm.py`), captured the genuine exchange, then rebuilt a full
-server emulator (`scripts/vh_mock3.py`) that replays it — and finally fed
+(`vh_mitm.py`), captured the genuine exchange, then rebuilt a full
+server emulator (`vh_mock3.py`) that replays it — and finally fed
 it the nofio base's own device records. The client enumerates the nofio
 devices from the emulator: full server emulation achieved.
 
@@ -228,10 +230,10 @@ The nofio base pushes its type-16 advertisement to ANY TCP peer without
 this exchange (silent-peer behavior); the enumeration only completes for
 a client that performs hello -> 9.
 
-### Artifacts
+### Artifacts (tooling retired 2026-11, scripts removed — kept for reference)
 
-- `scripts/vh_mitm.py` — bidirectional MITM with live framing decode
-- `scripts/vh_mock3.py` — full server emulator; `VH_DEVSRC=nofio` serves
+- `vh_mitm.py` — bidirectional MITM with live framing decode
+- `vh_mock3.py` — full server emulator; `VH_DEVSRC=nofio` serves
   the base's real type-16 device records (Index HMD, Valve radios, hub)
 - `/tmp/vh_mitm_raw.bin` — genuine exchange capture (raw, direction-tagged)
 - `/tmp/vh_push.bin` — the nofio base's advertisement capture
@@ -287,15 +289,89 @@ then against the base. Key findings:
    `imr-nofio1`, `wlp1s0`), then streams its type-16 device records to
    any peer — full enumeration with zero authentication, version tail
    of client 6.0.3 accepted.
-6. Remaining unexplored: the device-USE flow (USB descriptor/URB
-   tunneling after a client attaches a device) — the deepest hub parser
-   and the classic USB/IP RCE surface. Requires a real-client MITM
-   capture against the base (client binary already unpacked at
-   `/tmp/vhclient_unpacked`; `vhci_hcd` loads on the host).
+6. **Device-USE flow CAPTURED (2026-10-13, end of campaign).** With the
+   version-matched client `vhuit64 5.7.7` (the one bundled by the nofio
+   utility - user-provided copy) running through the pass-through MITM
+   (`VH_NOTRANSLATE=1 vh_mitm_translate.py (retired)`), the client natively
+   nests the base's device tree (hub `IMRNext (2a3613f8c0a2)`, devices
+   `imr-nofio1.111..115`) with NO dialect translation, and `USE` on the
+   Index HMD succeeds (`OK`; device attached to the host on vhci,
+   `idVendor 28de` live). The full USB-tunneling flow is captured in
+   `miscellaneous/vh-useflow-capture-2026-10-13.bin` (~89 KB,
+   direction-tagged raw chunks). Client 6.0.3 cannot be used for this:
+   its license gate refuses USE on the OEM-licensed base ("purchase a
+   license") unless the hub description is translated into the modern
+   dialect - and then the license fields are lost, so the wall remains;
+   only the 5.7.7 client works against the base's native dialect.
 
-Artifacts: `/tmp/vh_fuzz_local.py`, `/tmp/vh_fuzz_base.py`,
-`/tmp/vh_char.py`, `/tmp/vh_ctype_probe2.py`, `/tmp/vh_tunnel_exec.py`
-(session scratch; the reusable ones are committed under `scripts/`).
+   New message types observed in the USE flow (the USB/IP layer),
+   byte-exact layout decoded by `vh_useflow_decode.py`:
+
+   - C->S type **25** (33 B payload): USE request; device reference at
+     body byte 21 (0x6f = imr-nofio1.111);
+   - C->S type **0x000BB80D** (49 B payload): URB SUBMIT, 45-byte body:
+     `[0:13] zeros | [13:17] seq u32 LE (increments) | [21:25] device
+     u32 LE | [25:29] length-class u32 LE (16 for control) | [37:45]
+     USB setup packet`. All 25 captured submits are control transfers:
+     GET_DESCRIPTOR device/string/config (wLen 64/18/10/9/98/255...),
+     SET_ADDRESS, SET_CONFIG, HID class requests (SET_IDLE `21 0A`,
+     GET report descriptor `81 06 wVal=0x22xx`);
+   - S->C type **14** (49..434 B): URB COMPLETION - mirrored header
+     (seq @13, device @21, wLen+16 @25), setup echo @29, status @37,
+     actual_len @41, data @45 padded with zeros to wLength
+     (server-side buffer, zero-initialized in the capture);
+   - S->C type **39** (65911 B): post-USE descriptor-cache push:
+     [device 0x6f][len 65878][descriptor tree of the Index: device
+     desc `12 01 00 02 ... de 28 00 23` (VID 0x28de), 3 HID interfaces,
+     report descriptors][zero padding][hub serial "2a3613f8c0a2"].
+
+   Tools ready for the next campaign (PHASE 2 - not yet run):
+   - `vh_useflow_decode.py` - capture decoder/layout report;
+   - `vh_urb_fuzzer.py` - 77 structured cases in 5 classes
+     (A: USE field abuse; B: submit seq/device/length abuse; C: setup
+     packet bmRequestType/bRequest/wValue/wLength sweeps; D: envelope
+     framing/truncation; E: state abuse - submit before USE, floods,
+     abandon). The submit template is verified byte-exact against the
+     capture. Run in batches <= 25 with report fetches between them;
+     watch the completion padding for leak-shaped (non-zero) content -
+     that is the info-disclosure oracle if the server ever pads with
+     uninitialized memory.
+
+   This corpus is the baseline for the NEXT campaign: fuzzing the hub's
+   USB-traffic parser (malformed URBs, descriptor lengths, endpoint
+   addressing) - the layer where USB/IP-class memory corruption lives.
+   Procedure note: capture and crash-fuzzing must NOT share a boot
+   (see the resource-leak wedge, finding 2 above).
+
+7. **URB-parser fuzz campaign (2026-10-13, phase 2) — no memory
+   corruption found.** All 77 `vh_urb_fuzzer.py` cases ran clean
+   against the live paired base (3 batches with journal checks between
+   them): 0 crashes, 0 RST anomalies, 0 listener deaths, 0 kernel
+   segfault lines, 3 routine decode-failed warnings total, wedge never
+   approached. Notable server behaviors (no security impact found):
+   USE accepted for OTHER hub devices (112 = Valve VR Radio, 115 =
+   hub controller) with full descriptor-cache pushes - there is no
+   device-use authorization at all; submits with wrong device fields
+   are answered like valid ones; truncated submits (40-44 B bodies)
+   produce LARGER replies (~95 KB vs ~70 KB) - a parse divergence
+   worth remembering, but graceful; `bRequest=0x55` gets a short
+   error reply. Together with the message-layer campaign (finding 2:
+   ~196 cases), the embedded VirtualHere hub survives ~270 hostile
+   cases across both reachable layers: the DoS-grade robustness bugs
+   are real, but there is **no memory-corruption evidence in any
+   hub code path reachable from the PC side**. Remaining unexplored
+   in the hub: the bulk/interrupt submit format (never captured -
+   the Index only produced control transfers) and long random
+   mutation campaigns (diminishing returns; the structured sweeps
+   covering every field found nothing). Conclusion: the hub is a
+   hard target; priority for shell access shifts to the physical
+   routes (JTAG, DEBUG_ACCESS_PLAN.md) and the 6 GHz wireless side.
+
+Artifacts (tooling retired 2026-11, scripts removed — kept for reference):
+`vh_fuzz_local.py`, `vh_fuzz_base.py`, `vh_tunnel_exec.py`, `vh_mitm_translate.py`
+(translate + pass-through modes), `miscellaneous/vh-useflow-capture-2026-10-13.bin`,
+`miscellaneous/vhuit64_5.7.7` (client binary - UNCOMMITTED, decision
+pending: repo policy is to not distribute vendor binaries).
 
 ## 2. Software inventory (versions confirmed on the device)
 
@@ -601,8 +677,8 @@ to the wireless interface — relevant once WiFi-6E hardware is available.
 
 The base-head link AP is **6 GHz 802.11ax**, not 2.4 GHz: `BaseStatus`
 reports `WirelessChannel = 13` with `ChannelFreq = 6015` (6 GHz channel 13
-= 6010 MHz, `Isax = 1`); the earlier "channel 13, 2.4 GHz" reading in
-`wifi_probe_nofio.sh` was a misinterpretation of the same numbers. The
+= 6010 MHz, `Isax = 1`); an earlier "channel 13, 2.4 GHz" reading was a
+misinterpretation of the same numbers. The
 test host's Intel 8265 is 2.4/5 GHz only, so the AP is invisible to it
 regardless of regdomain (verified with `iw reg set IT`). Reaching the
 wireless-side surface (dnsmasq-on-wlp1s0 DNS? 7575 in paired state?

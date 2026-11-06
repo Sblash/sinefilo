@@ -13,13 +13,12 @@
 3. [Hardware Analysis](#hardware-analysis)
 4. [Software Analysis](#software-analysis)
 5. [Firmware Analysis](#firmware-analysis)
-6. [Communication Protocol](#communication-protocol)
-7. [System Architecture](#system-architecture)
-8. [Key Findings](#key-findings)
-9. [Tools Used](#tools-used)
-10. [Points of Attention](#points-of-attention)
-11. [Next Steps](#next-steps)
-12. [External Resources](#external-resources)
+6. [Communication Protocol & System Architecture](#communication-protocol--system-architecture) (pointer — see PROTOCOL.md / ARCHITECTURE.md)
+7. [Key Findings](#key-findings)
+8. [Tools Used](#tools-used)
+9. [Points of Attention](#points-of-attention)
+10. [Next Steps](#next-steps) (pointer — see README.md)
+11. [External Resources](#external-resources)
 
 ---
 
@@ -36,14 +35,12 @@ Create a **complete open source solution** for Nofio hardware (wireless adapter 
 
 ### Current Status
 
-- Complete static analysis (all files scanned)
-- Hardware identified (VID:PID, chipset)
-- Architecture understood (role of each component)
-- Firmware analyzed (ARM Thumb code found)
-- Protocol hypothesized (based on OpenVR + VirtualHere)
-- Dynamic reverse engineering (requires hardware/Windows) - Pending
-- Open source implementation (to be started) - Pending
-- **Phase 1: PDB analysis complete — driver_nofio is a settings companion device, not in the streaming path (see [driver/PDB_ANALYSIS.md](../driver/PDB_ANALYSIS.md))**
+- Complete static analysis of the shipped software (utility, manifests) — done
+- Original SteamVR driver analyzed (PDB): settings companion only, not in the streaming path — driver folder removed from the repo (2026-11)
+- Utility↔base TCP protocol **verified live** (see [PROTOCOL.md](PROTOCOL.md)); network attack surface assessed (see [SECURITY_ANALYSIS.md](SECURITY_ANALYSIS.md))
+- Base hardware **identified and accessed live**: ZynqMP ZU3CG on Trenz TE0803, UART console + U-Boot interrupt + root shell, persistent root via config injection (see [HARDWARE_ACCESS.md](HARDWARE_ACCESS.md), [ROOT_PERSISTENCE.md](ROOT_PERSISTENCE.md), [BOOT_CHAIN.md](BOOT_CHAIN.md))
+- Firmware: secure-boot crypto fully characterized — **cannot be decrypted/re-encrypted offline; track archived** (see [BOOT_CHAIN.md](BOOT_CHAIN.md) and `firmware/`)
+- Open source utility (Dart/Flutter) and direct-USB driver — pending
 
 ---
 
@@ -103,9 +100,11 @@ nofio utility/
 
 | Device | VID:PID | Description | Type |
 |---------|---------|-------------|------|
-| **Nofio Base Station** | **04b3:4010** | IBM Corp. IMRWirelessVR | USB Ethernet device |
+| **Nofio Base Station** | **04b3:1234** | "Nofio Wireless Base" (IMRNext) | USB CDC-NCM network device — **verified live 2026-10-02** |
 
-> **Note:** VID `04b3` was found in `nofioUtility.exe` at multiple offsets (0x2806, 0x2A4E, 0x92BC, etc.)
+> **Correction:** the old `04b3:4010` (IBM Corp. IMRWirelessVR, found as a string
+> in `nofioUtility.exe`) is not the live VID:PID; the base enumerates as
+> `04b3:1234` with a single CDC-NCM configuration (no hidden serial-over-USB).
 
 ### Firmware Version
 
@@ -190,96 +189,13 @@ $AE275D11-DADF-4010-BF10-CCA5C83DCBB0
 
 ---
 
-### 2. SteamVR Driver: driver_nofio.dll
+### 2. SteamVR Driver: driver_nofio.dll — removed
 
-#### Properties
-
-- **Size:** 17 KB (DLL) + 913 KB (PDB with full debug symbols)
-- **Language:** C++
-- **Type:** DLL (Dynamic Link Library)
-- **Entry Point:** HmdDriverFactory (exported)
-- **Compilation:** Visual Studio 2022 Community (VC++ 14.36.32532)
-- **Source Project:** `steamvr_integration/Driver` (build path recovered from PDB)
-
-#### Export Table
-
-```
-Ordinal Base: 1
-Number of Exports: 1
-Export: HmdDriverFactory @ RVA 0x16C0
-```
-
-#### Implemented SteamVR Interfaces
-
-Classes found in the PDB implement only two OpenVR interfaces:
-
-```
-IServerTrackedDeviceProvider_004  -> class device_provider
-ITrackedDeviceServerDriver_005    -> class device_settings
-```
-
-The remaining interface strings in the DLL (`IVRServerDriverHost_006`,
-`IVRWatchdogProvider_001`, `IVRCompositorPluginProvider_001`,
-`IVRProperties_001`, `IVRDriverLog_001`, `IVRDriverManager_001`,
-`IVRSettings_003`, `IVRDisplayComponent_002`, `IVRDriverDirectModeComponent_008`,
-`IVRCameraComponent_003`, `IVRVirtualDisplay_002`) are the standard names
-queried through the driver context / `GetComponent`; no display, camera, or
-direct-mode component is implemented.
-
-#### Class Structure (from PDB)
-
-| Class | Base | Methods |
-|-------|------|---------|
-| `device_provider` | `IServerTrackedDeviceProvider` | `Init`, `Cleanup`, `RunFrame`, `GetInterfaceVersions`, `EnterStandby`, `LeaveStandby`, `ShouldBlockStandbyMode` |
-| `device_settings` | `ITrackedDeviceServerDriver` | `Activate`, `Deactivate`, `GetPose`, `RunFrame` |
-| `device_status` | - | Status bookkeeping (no additional device) |
-| `IDevice` | `ITrackedDeviceServerDriver` | `GetComponent`, `DebugRequest`, `EnterStandby` |
-
-Source files: `driver_factory.cpp`, `device_provider.cpp/h`,
-`device_settings.cpp/h`, `device_status.cpp/h`, `idevice.h`.
-
-#### Log Messages
-
-```
-"Driver loaded, adding devices..."
-"Driver load complete!"
-"Settings device activated! Adding properties..."
-```
-
-#### Imports Analysis
-
-The DLL imports only CRT and `kernel32` basics (`malloc`, `memcpy`, `strcmp`,
-`QueryPerformanceCounter`, ...). **No `winusb`, `setupapi`, or `ws2_32`**:
-the driver performs zero USB, network, or display I/O.
-
-#### Role in the Stack
-
-The driver registers a single stationary virtual device
-(`"nofio_settings"`), made always present by `alwaysActivate: true` in the
-manifest. It is a **settings/status companion** for `nofioUtility.exe`
-(properties exchanged via `IVRSettings_003` / `IVRProperties_001`), not part
-of the streaming path:
-
-```
-SteamVR -> native Valve Index driver (lighthouse) -> VirtualHere Client
-        -> 192.168.3.1:7575 (VirtualHere Server) -> USB -> Valve Index
-```
-
-The headset chain works without the driver; the driver cannot work without
-SteamVR.
-
-#### Implications for the Linux Port
-
-- The binary is Windows-only (PE32+) and cannot be loaded on Linux; keep it
-  as an OpenVR API reference only.
-- Its function (settings companion) is optional: a VirtualHere client on
-  Linux plus SteamVR's native Index driver cover the streaming path without
-  any custom driver.
-- The direct-USB driver planned as the "Target" architecture is new work;
-  this artifact is not a starting point for it beyond OpenVR API usage.
-
-See [driver/PDB_ANALYSIS.md](../driver/PDB_ANALYSIS.md) for the full
-reconstructed behavior.
+The original `driver_nofio.dll` was analyzed (PDB): it is a **settings/status
+companion device** (`nofio_settings`, no USB/network/display I/O) and is not in
+the streaming path, which runs through SteamVR's native Valve Index driver over
+VirtualHere. **Decision (2026-11): no custom driver will be written** — the
+`driver/` folder (with the PDB analysis) has been removed from this repository.
 
 ### 3. VirtualHere: vhui64.exe
 
@@ -492,154 +408,26 @@ Offset  Range       Hex Values                     Description
 
 ---
 
-## Communication Protocol
+## Communication Protocol & System Architecture
 
-### System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              PC (Windows/Linux)                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐  │
-│  │  nofioUtility   │    │  VirtualHere     │    │   SteamVR        │  │
-│  │   (.NET 7)      │    │   Client         │    │                 │  │
-│  └──────────┬──────┘    └──────────┬──────┘    └──────────┬──────┘  │
-│              │                      │                      │           │
-│              │  SteamVR API        │  USB-over-IP         │           │
-│              ▼                      ▼                      ▼           │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │                        driver_nofio.dll                                ││
-│  │  (ITrackedDeviceServerDriver, IServerTrackedDeviceProvider)          ││
-│  └─────────────────────────────────────────────────────────────────────┘│
-│                                                                           │
-└─────────────────────────────────────────────────────────────────────────┘
-                                                    │
-                                                    ▼ (USB Ethernet)
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          Nofio Base Station                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│  VID:PID = 04b3:4010 (IBM Corp. IMRWirelessVR)                            │
-│  Chipset: QCA2066 (Qualcomm WiFi)                                         │
-│  IP: 192.168.3.1:7575 (VirtualHere Server)                               │
-│                                                                           │
-│  ┌─────────────────┐    ┌─────────────────────────┐                     │
-│  │   Firmware       │    │   VirtualHere Server    │                     │
-│  │   base_BOOT.BIN  │    │                         │                     │
-│  └─────────────────┘    └─────────────────────────┘                     │
-│                           │                                                 │
-│                           ▼ (WiFi QCA2066)                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │                         Nofio Head Adapter                              ││
-│  ├─────────────────────────────────────────────────────────────────────┤│
-│  │  Firmware: head_BOOT.BIN                                              ││
-│  │  OS: QNX6 Neutrino                                                   ││
-│  │  Chipset: QCA2066 (Qualcomm WiFi)                                   ││
-│  └───────────────────────────────┬───────────────────────────────────┘│
-│                                      │                                     │
-│                                      ▼ (USB/Oculink)                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │                        Valve Index Headset                            ││
-│  └─────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────┘
-```
+> **Superseded — kept as pointer only.** These two sections previously duplicated
+> (with outdated hypotheses) what is now verified live and documented in
+> [ARCHITECTURE.md](ARCHITECTURE.md) and [PROTOCOL.md](PROTOCOL.md): the base's
+> real VID:PID is **04b3:1234** (CDC-NCM only, no hidden serial-over-USB), and
+> the utility↔base control protocol runs over direct TCP (34566/34567), not only
+> through VirtualHere. Device-side boot/hardware access is covered by
+> [HARDWARE_ACCESS.md](HARDWARE_ACCESS.md) and [BOOT_CHAIN.md](BOOT_CHAIN.md).
 
 ---
-
-### Communication Flow
-
-1. **System Startup**
-   - PC detects base station as USB device (04b3:4010)
-   - USB network interface is created (e.g., enp0s20f0u1)
-   - PC connects to 192.168.3.x subnet
-
-2. **VirtualHere Startup**
-   - VirtualHere client connects to 192.168.3.1:7575
-   - Authentication via EasyFindId/Pin (device-specific pairing credentials, redacted — see the vhui.ini section)
-   - Establishes USB-over-IP tunnel
-
-3. **SteamVR + Driver Startup**
-   - SteamVR loads driver_nofio.dll via HmdDriverFactory
-   - Driver registers the `nofio_settings` companion device with SteamVR
-   - VirtualHere allows PC to "see" headset as local USB device
-
-4. **Usage**
-   - SteamVR talks to the headset via its native Valve Index (lighthouse) driver, over the VirtualHere USB tunnel
-   - Driver does NOT directly access USB (no USB/network I/O at all; it only exposes settings/status properties)
-   - .NET utility manages: configuration, firmware updates, notifications
-
----
-
-### Technical Details
-
-#### USB Network Interface
-
-- **Type:** CDC Ethernet (USB CDC-ECM or RNDIS)
-- **VID:PID:** 04b3:4010
-- **Linux Kernel Modules:** usbip_core, cdc_ether, usbnet
-- **Command:** lsusb | grep "IMRWirelessVR"
-
-#### VirtualHere
-
-- **Server IP:** 192.168.3.1
-- **Server Port:** 7575
-- **EasyFindId:** (device-specific pairing credential, redacted)
-- **EasyFindPin:** (device-specific pairing credential, redacted)
-- **Protocol:** Proprietary USB/IP
-
-#### SteamVR
-
-- **Driver Interface:** ITrackedDeviceServerDriver_005
-- **Provider Interface:** IServerTrackedDeviceProvider_004
-- **Error Codes:** Wireless-specific error handling
-
----
-
-## System Architecture
-
-### Abstraction Layers
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer (User Space)             │
-├─────────────────────────────────────────────────────────────┤
-│  nofioUtility (.NET 7)  ┊  SteamVR  ┊  VirtualHere Client     │
-│  - GUI                 ┊  - API    ┊  - USB/IP              │
-│  - Settings            ┊  - Compositor                           │
-│  - Firmware Update     ┊  - Tracking                             │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│             Plugin Layer (User Space, no kernel driver)      │
-├─────────────────────────────────────────────────────────────┤
-│  driver_nofio.dll (Windows)  ┊  libusb (Linux)                │
-│  - Settings companion device   ┊  - Device detection          │
-│    ("nofio_settings", no I/O)  ┊  - USB access                │
-│  - Exposes properties only     ┊                                   │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                    Hardware Layer                               │
-├─────────────────────────────────────────────────────────────┤
-│  Base Station (04b3:4010)  ┊  Head Adapter  ┊  Valve Index   │
-│  - QCA2066 WiFi          ┊  - QCA2066 WiFi  ┊                │
-│  - ARM CPU               ┊  - ARM CPU       ┊                │
-│  - USB Ethernet          ┊  - QNX6 OS        ┊                │
-│  - VirtualHere Server    ┊  - Oculink USB   ┊                │
-│  - firmware: base_BOOT   ┊  - firmware: head_BOOT  ┊        │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## Key Findings
 
 ### Hardware
 
-1. **Base Station VID:PID:** 04b3:4010 (IBM Corp. IMRWirelessVR)
-2. **WiFi Chipset:** QCA2066 (Qualcomm Atheros) - confirmed by changelog
-3. **Two Components:** Base Station + Head Adapter
-4. **Identifier:** nofio1
+1. **Base Station VID:PID:** 04b3:1234 "Nofio Wireless Base" (verified live; CDC-NCM only)
+2. **SoC:** Xilinx ZynqMP ZU3CG on a Trenz TE0803 SoM, FPGA fabric "spark-60", QSPI boot (Micron n25q00a 256 MiB)
+3. **WiFi:** QCA2066 (WiFi 6E) + 60 GHz Wilocity-family radios (`wil6210`/`wil6436`) — base is the AP, link is 6 GHz 802.11ax
+4. **Two Components:** Base Station + Head Adapter
+5. **Identifier:** nofio1
 
 ### Software
 
@@ -649,19 +437,16 @@ Offset  Range       Hex Values                     Description
 4. **VirtualHere:** Third-party software for USB-over-IP (192.168.3.1:7575)
 ### Firmware
 
-1. **Architecture:** ARM Thumb Little-Endian
-2. **Functions Found:** 108+ functions in base_BOOT.BIN
-3. **QNX6:** head_BOOT.BIN contains a QNX6 filesystem
-4. **Compression:** Both files contain gzip/zstd sections
-5. **Encryption:** head_BOOT.BIN contains PGP RSA keys
-6. **Custom Header:** fU\x99\xaaXNLX at offset 0x20
+1. BOOT.BIN files are **Xilinx ZynqMP secure-boot images**: AES-256-GCM (eFUSE/BBRAM device key) + RSA-2048 signatures — see [BOOT_CHAIN.md](BOOT_CHAIN.md)
+2. The binwalk "QNX6 filesystem", "PGP RSA key", "ARM Thumb functions" and "GIF image" hits were **false positives on ciphertext** (see the correction notice in [firmware/firmware_analysis.md](../firmware/firmware_analysis.md))
+3. **Firmware track archived**: offline decrypt/re-encrypt is impossible (device key never leaves the chip); `firmware/` is reference-only
 
 ### Protocol
 
-1. **Transport:** USB (virtualized via VirtualHere over IP)
-2. **Network:** Dedicated 192.168.3.x subnet
-3. **Port:** 7575 (VirtualHere default)
-4. **Driver does not access USB directly:** Everything managed by VirtualHere
+1. **Transport:** USB over IP via VirtualHere (192.168.3.1:7575) for the streaming path — interim solution
+2. **Control protocol:** direct TCP to the base, ports 34566/34567 (head-facing 34568), protobuf-framed — verified live, see [PROTOCOL.md](PROTOCOL.md)
+3. **Network:** dedicated 192.168.3.x subnet over USB CDC-NCM
+4. **Driver does not access USB directly:** everything managed by VirtualHere
 
 ---
 
@@ -684,7 +469,7 @@ Offset  Range       Hex Values                     Description
 | Tool | Usage |
 |------|----------|
 | dnSpy | .NET decompilation (C#) |
-| x64dbg | Debugging driver/native |
+| x64dbg | Debugging native binaries |
 | Wireshark + USBPcap | USB traffic capture |
 | tcpdump | Network traffic capture |
 | Process Monitor | System monitoring |
@@ -711,17 +496,18 @@ Offset  Range       Hex Values                     Description
    - All hardware communications go through **VirtualHere**
    - **Implication:** For optimal performance, we need to **bypass VirtualHere**
 
-2. **Compressed/Encrypted Firmware**
-   - Both firmware files have **high entropy** (7.25 bits/byte)
-   - Contain **gzip/zstd signatures** and **PGP keys**
-   - **Implication:** Complete reverse engineering requires **decompression**
+2. **Firmware is untouchable — track archived**
+   - BOOT.BIN is AES-256-GCM encrypted with the per-device eFUSE/BBRAM key and
+     RSA-2048 signed; the key never leaves the chip (verified via FSBL/OCM dump,
+     [BOOT_CHAIN.md](BOOT_CHAIN.md))
+   - **Implication:** no offline decrypt, no custom firmware on stock hardware;
+     effort shifts to runtime patching ([ROOT_PERSISTENCE.md](ROOT_PERSISTENCE.md))
+     and the GPL source request
 
 ### Difficulties
 
-1. **Firmware Reverse**
-   - ARM Thumb code (requires Ghidra/IDA)
-   - QNX6 filesystem (requires specific tools)
-   - **Difficulty:** 4/5 stars
+1. **Firmware Reverse** — **closed/archived** (see above); the binwalk signatures
+   were false positives on ciphertext
 
 2. **Direct Protocol**
    - Bypass VirtualHere
@@ -729,8 +515,8 @@ Offset  Range       Hex Values                     Description
    - **Difficulty:** 5/5 stars
 
 3. **Open Source Firmware**
-   - Recreate firmware from scratch
-   - QCA2066 Linux support
+   - Not possible on stock hardware (secure boot); would need vendor cooperation
+     or different hardware
    - **Difficulty:** 5/5 stars
 
 ### Opportunities
@@ -751,48 +537,10 @@ Offset  Range       Hex Values                     Description
 
 ## Next Steps
 
-### Phase 0: Project Setup (1 day)
-
-- [x] Clone repository
-- [x] Create directory structure
-- [x] Move existing documentation
-- [x] Create README, CONTRIBUTING, LICENSE
-- [x] Create initial documentation templates
-
-### Phase 1: Open Source Utility
-
-- [ ] Analysis Windows utility app and reverse engineering
-- [ ] Open source app reimplementation for Linux
-- [ ] Reading nofio-base status
-- [ ] Pairing (nofio-base <-> nofio-head)
-- [ ] Firmware update
-- [ ] Logging and diagnostics
-
-### Phase 2: Complete Analysis driver
-
-- [ ] Extract all information from PDB - Scripts in ./scripts/
-- [ ] Driver skeleton (OpenVR SDK)
-- [ ] Implementation driver in the new utility app
-- [ ] Implement HmdDriverFactory
-- [ ] Device management (ITrackedDeviceServerDriver)
-- [ ] Wireless properties (battery, status, etc.)
-- [ ] Hardware detection (VID:PID 04b3:4010)
-- [ ] VirtualHere integration
-
-### Phase 3: Open Source Firmware
-
-- [ ] Complete firmware decompression
-- [ ] Disassemble all Thumb functions
-- [ ] Document firmware call graph
-- [ ] QNX6 filesystem analysis
-- [ ] ARM Thumb code reverse engineering
-- [ ] Port to open source framework (Zephyr, FreeRTOS)
-- [ ] QCA2066 WiFi support
-
-### Phase 4: Optimizations and fixes
-
-- [ ] Fix current nofio firmware bugs
-- [ ] Latency optimization
+The phased plan lives in [README.md](../README.md) (Project Status / Phases) and
+is kept up to date there — including the archived firmware track
+(see [BOOT_CHAIN.md](BOOT_CHAIN.md)) and the device-access work
+([HARDWARE_ACCESS.md](HARDWARE_ACCESS.md), [ROOT_PERSISTENCE.md](ROOT_PERSISTENCE.md)).
 
 ---
 

@@ -579,7 +579,7 @@ software stack with board `..._dp_head`, its own serial
 
 ### What is known
 
-From the PDB analysis of `driver_nofio.pdb`:
+Analysis of the original `driver_nofio.dll` (via its PDB) showed:
 
 - The driver (`driver_nofio.dll`) implements standard SteamVR interfaces and does **not** directly access USB hardware
 - All USB communication is delegated to VirtualHere
@@ -733,7 +733,7 @@ What is known:
 
 - The original driver (`driver_nofio.dll`) does NOT directly access USB
 - All communication goes through VirtualHere
-- The driver only implements SteamVR interfaces (confirmed by PDB analysis)
+- The original driver only implements SteamVR interfaces — no direct USB access (confirmed via its PDB)
 - The utility (`nofioUtility.exe`) is a .NET 7 C# application that manages firmware updates, settings, and notifications
 
 ### Target Implementation **[Hypothetical]**

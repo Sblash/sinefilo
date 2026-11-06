@@ -1,5 +1,12 @@
 # BOOT.BIN Format Analysis (Xilinx ZynqMP Boot Image)
 
+> **🗄️ ARCHIVED (2026-11):** this whole `firmware/` directory is kept for
+> reference only — no further work planned. We proved (FSBL analysis of the OCM
+> dump + live boot logs) that the firmware can be **neither decrypted nor
+> re-encrypted offline**: AES-256-GCM with the per-device key in eFUSE/BBRAM +
+> RSA-2048 secure boot, key never leaving the chip. See
+> [docs/BOOT_CHAIN.md](../docs/BOOT_CHAIN.md) for the crypto verdict and layout.
+
 Static analysis of `base_BOOT.BIN` / `head_BOOT.BIN`
 (`miscellaneous/Resources/Firmware/`, from the v2.5.0 update package).
 Tool: [`scripts/parse_boot_bin.py`](../scripts/parse_boot_bin.py).

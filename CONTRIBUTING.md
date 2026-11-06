@@ -34,8 +34,7 @@ Thank you for your interest in contributing to the nofio-linux project! This doc
 | Component | Language | Build |
 |-----------|----------|-------|
 | Utility app | Dart | Flutter |
-| SteamVR driver | C++ | CMake |
-| Firmware analysis | Python 3 | Standalone scripts |
+| Analysis scripts | Python 3 | Standalone scripts (`firmware/` is archived reference — no new code planned there) |
 
 ### General
 
@@ -72,9 +71,9 @@ Types: feat, fix, docs, style, refactor, test, chore
 
 Example:
 ```
-feat(driver): add initial SteamVR driver skeleton
+feat(utility): add base status polling view
 
-Implements HmdDriverFactory with basic device registration.
+Reads BaseStatus over TCP 34566 and renders battery/link state.
 Closes #123
 ```
 

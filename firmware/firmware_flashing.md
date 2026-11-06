@@ -1,5 +1,10 @@
 # Firmware Flashing
 
+> **🗄️ ARCHIVED (2026-11):** this whole `firmware/` directory is kept for
+> reference only — no further work planned. The device firmware cannot be
+> decrypted or re-encrypted offline (AES device key in eFUSE/BBRAM + RSA-2048
+> secure boot); see [docs/BOOT_CHAIN.md](../docs/BOOT_CHAIN.md).
+
 How the original nofio utility (`nofioUtility.exe`, .NET 7 / WPF) flashes
 firmware onto the nofio base station and head adapter. This document is the
 result of **static analysis only** — of the decompiled application

@@ -4,35 +4,22 @@ Open source implementation for Nofio wireless VR adapter (Valve Index).
 
 > **Disclaimer:** this is an independent, community reverse-engineering project
 > for interoperability purposes. It is not affiliated with, endorsed by, or
-> sponsored by IMRNext. "nofio" is a trademark of IMRNext. No vendor binaries,
+> sponsored by IMRNext. No vendor binaries,
 > firmware images, or third-party proprietary software are distributed in this
 > repository.
 
 ## Project Status
 
-This project aims to create a complete open source solution for the Nofio wireless adapter, enabling native Linux support and open source firmware.
-
-**Current Phase:** 1 - Open Source Utility (In Progress)
-
-**Hardware:** Original Nofio hardware (base station + head adapter + Valve Index) is available for dynamic analysis and testing.
+**Current Phase:** 3 - Open-source utility app
 
 ## Overview
 
 Nofio is a wireless adapter for the Valve Index VR headset that uses VirtualHere for USB-over-IP communication between the base station and the PC. This project seeks to:
 
 - Provide native Linux support
-- Recreate firmware as open source
-- Enable community development and bug fixes
+- Recreate the utility app as open source
+- Enable community development and bug fixes (runtime patch layer via [docs/ROOT_PERSISTENCE.md](docs/ROOT_PERSISTENCE.md))
 - Prevent hardware abandonment (e-waste)
-
-## Technology Stack
-
-| Component | Technology | Notes |
-|-----------|-----------|-------|
-| Utility app | Dart + Flutter | Cross-platform GUI (replaces original .NET 7 app) |
-| SteamVR driver | C++ (OpenVR SDK) | Native driver implementing ITrackedDeviceServerDriver_005 / IServerTrackedDeviceProvider_004 (original driver is a settings companion only, see [driver/PDB_ANALYSIS.md](driver/PDB_ANALYSIS.md)) |
-| Firmware tools | Python 3 | Analysis scripts (binwalk, capstone, PDB parsing) |
-| USB access | libusb (via Dart FFI) | Direct USB communication, bypassing VirtualHere |
 
 ## Quick Start
 
@@ -47,95 +34,57 @@ device-specific credentials redacted) in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Documentation
 
-- [Analysis Report](docs/ANALYSIS.md) - Complete reverse engineering analysis
-- [Firmware Flashing](firmware/firmware_flashing.md) - How the utility flashes firmware (static analysis of the decompiled app)
-- [Boot Image Format](firmware/boot_image_format.md) - BOOT.BIN is a secure-boot Xilinx ZynqMP image (AES eFUSE + RSA)
+- [Analysis Report](docs/ANALYSIS.md) - Reverse engineering report (static analysis of the shipped software)
 - [Architecture](docs/ARCHITECTURE.md) - System architecture
-- [Protocol](docs/PROTOCOL.md) - Communication protocol
+- [Protocol](docs/PROTOCOL.md) - Communication protocol (verified live)
+- [Security Analysis](docs/SECURITY_ANALYSIS.md) - TCP/IP attack surface of the base (live assessment)
+- [Hardware Access](docs/HARDWARE_ACCESS.md) - UART/JTAG pads, consoles, U-Boot interrupt, root shell, safety rules
+- [Root Persistence](docs/ROOT_PERSISTENCE.md) - persistent root via config injection (verified)
+- [Boot Chain & Crypto](docs/BOOT_CHAIN.md) - secure boot chain, crypto verdict, flash map, U-Boot facts
 - [Utility Codebase Analysis](docs/UTILITY_CODEBASE_ANALYSIS.md) - Analysis of the original nofioUtility.exe (decompiled)
-- [Utility Conceptual Map](docs/UTILITY_CONCEPTUAL_MAP.md) - Conceptual map of the original utility's codebase
-- [Driver PDB Analysis](driver/PDB_ANALYSIS.md) - Analysis of the original SteamVR driver
 - [Original Guide](docs/ORIGINAL_README.md) - Original Linux setup guide
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
-
-## Project Structure
-
-```
-nofio-linux/
-├── README.md                    # This file
-├── LICENSE                     # GPLv3 license
-├── CONTRIBUTING.md             # Contribution guidelines
-├── docs/                       # Documentation
-│   ├── ANALYSIS.md             # Reverse engineering report
-│   ├── ARCHITECTURE.md         # System architecture
-│   ├── PROTOCOL.md             # Communication protocol
-│   ├── UTILITY_CODEBASE_ANALYSIS.md  # Original utility analysis (decompiled)
-│   ├── UTILITY_CONCEPTUAL_MAP.md     # Original utility conceptual map
-│   ├── ORIGINAL_README.md      # Original guide
-│   └── TROUBLESHOOTING.md      # Troubleshooting guide
-├── scripts/                    # Analysis and automation scripts
-├── utility/                   # Open source utility app (Dart + Flutter)
-├── firmware/                   # Firmware analysis and original files
-└── driver/                     # SteamVR driver implementation (C++)
-```
-
-## Hardware Information
-
-- **SoC:** Xilinx Zynq UltraScale+ MPSoC on a Trenz TE0803 SoM (custom IMRNext carrier), secure boot enforced (AES eFUSE + RSA-4096)
-- **Base VID:PID:** 04b3:1234 ("Nofio Wireless Base", IMRNext; verified live, CDC network class)
-- **OS:** Buildroot Linux 5.10.0-nofio (aarch64, initramfs)
-- **WiFi Chipset:** QCA2066 (Qualcomm Atheros) + 60 GHz Wilocity-family radios (`wil6210.fw`, `wil6436.fw`)
-- **Network:** USB Ethernet (CDC)
-- **IP Range:** 192.168.3.x
-- **VirtualHere Server:** 192.168.3.1:7575
+- `firmware/` — 🗄️ **archived** (reference only): BOOT.BIN is a secure-boot ZynqMP image (AES device key in eFUSE/BBRAM + RSA-2048); decrypt/re-encrypt offline is impossible, see [docs/BOOT_CHAIN.md](docs/BOOT_CHAIN.md)
+- `miscellaneous/` — raw material: decompiled utility, extracted rootfs, PCB photos, raw session logs (`mistral-nofio-knowledge/`), analysis notes
 
 ## Phases
 
-### Phase 0: Project Setup (1 day)
-- [x] Clone repository
-- [x] Create directory structure
-- [x] Move existing documentation
-- [x] Create README, CONTRIBUTING, LICENSE
-- [x] Create initial documentation templates
+### Phase 1: Static analysis of the shipped software
+- [x] `nofioUtility.exe` decompiled and analyzed — [docs/UTILITY_CODEBASE_ANALYSIS.md](docs/UTILITY_CODEBASE_ANALYSIS.md), [docs/UTILITY_CONCEPTUAL_MAP.md](docs/UTILITY_CONCEPTUAL_MAP.md)
+- [x] Firmware package structure: BOOT.BIN image format + utility flashing flow (static) — `firmware/boot_image_format.md`, `firmware/firmware_flashing.md`
 
-### Phase 1: Open Source Utility
-- [ ] Analysis Windows utility app and reverse engineering
-- [ ] Open source app reimplementation for Linux
-- [ ] Reading nofio-base status
+> **Custom SteamVR driver development is excluded — we won't write one.**
+> The streaming path already works through SteamVR's **native Valve Index
+> driver** over VirtualHere; the original `driver_nofio.dll` is only a
+> settings/status companion (no USB/network/display I/O), so there is nothing
+> to reimplement. The `driver/` folder has been removed from this repo, and
+> the old "direct USB protocol bypassing VirtualHere" goal is dropped with it.
+
+### Phase 2: Dynamic analysis & device access
+- [x] Live recon of the base over USB + attack-surface assessment — [docs/SECURITY_ANALYSIS.md](docs/SECURITY_ANALYSIS.md)
+- [x] Control protocol reverse engineered and verified live (TCP 34566/34567, protobuf) — [docs/PROTOCOL.md](docs/PROTOCOL.md)
+- [x] Hardware detection (VID:PID 04b3:1234 base, verified live; head TBD)
+- [x] VirtualHere integration as interim solution (client 5.7.7) — hub *research* retired
+- [x] UART/U-Boot access to the base + root shell in RAM — [docs/HARDWARE_ACCESS.md](docs/HARDWARE_ACCESS.md)
+- [x] Persistent root via config injection, verified — [docs/ROOT_PERSISTENCE.md](docs/ROOT_PERSISTENCE.md)
+- [x] Firmware / boot-chain analysis (🗄️ track archived, reference only):
+  - [x] Secure-boot crypto characterized from the FSBL/OCM dump: AES-256-GCM device key (eFUSE/BBRAM) + RSA-2048/SHA3-384 — **firmware can be neither decrypted nor re-encrypted offline** — [docs/BOOT_CHAIN.md](docs/BOOT_CHAIN.md)
+  - [x] Flash map + U-Boot facts (ENV_OFFSET inside the encrypted FIT → never `saveenv`; boot script stubbed) — [docs/BOOT_CHAIN.md](docs/BOOT_CHAIN.md), [docs/HARDWARE_ACCESS.md](docs/HARDWARE_ACCESS.md)
+  - [x] Device-side rootfs analyzed (Buildroot 2020.05.1, `imr_controller`, boot hooks) — `miscellaneous/ROOTFS_2.5.0_ANALYSIS.md`
+  - [~] Custom/open firmware on stock hardware — **impossible** (secure boot only launches vendor-signed images) → closed
+  - [ ] ~~QCA2066 / 60 GHz wireless-side research~~ — dropped (scripts removed)
+  - [ ] GPL source request to support.nofio.co (kernel/U-Boot/Buildroot, exact version) — optional, recommended
+
+### Phase 3: Open-source utility app (Dart + Flutter)
+- [ ] Open-source app reimplementation for Linux
+- [ ] Reading nofio-base status (TCP 34566 — [docs/PROTOCOL.md](docs/PROTOCOL.md))
+- [ ] Patch injection
+- [ ] Advanced settings
 - [ ] Pairing (nofio-base <-> nofio-head)
-- [ ] Firmware update
 - [ ] Logging and diagnostics
 
-### Phase 2: SteamVR Driver + Dynamic Analysis
-- [ ] Extract all information from PDB - Scripts in ./scripts/
-- [ ] USB packet capture (Wireshark/usbmon on Linux, USBPcap on Windows)
-- [ ] Reverse engineer direct USB protocol (bypassing VirtualHere)
-- [ ] Driver skeleton (OpenVR SDK)
-- [ ] Implement HmdDriverFactory
-- [ ] Device management (ITrackedDeviceServerDriver_005)
-- [ ] Device provider (IServerTrackedDeviceProvider_004)
-- [ ] Wireless properties (battery, status, etc.)
-- [ ] Hardware detection (VID:PID 04b3:1234 base, verified live; head TBD)
-- [ ] VirtualHere integration (interim solution)
-
-> **Note (static analysis):** the original `driver_nofio.dll` is a
-> settings/status companion device (`nofio_settings`) that performs no
-> USB, network, or display I/O — it is not in the streaming path, which runs
-> through SteamVR's native Valve Index driver over VirtualHere. Use the
-> binary as an OpenVR API reference only; the direct-USB driver is new work.
-> Details: [driver/PDB_ANALYSIS.md](driver/PDB_ANALYSIS.md).
-
-
-### Phase 3: Open Source Firmware
-- [x] Identify the shipped image format ([firmware/boot_image_format.md](firmware/boot_image_format.md)): Xilinx ZynqMP secure boot image (AES eFUSE + RSA-4096); per-device encrypted, so static extraction is ruled out
-- [ ] Dynamic capture of a real firmware update (tcpdump/usbmon)
-- [ ] UART/JTAG inspection of the Trenz TE0803 SoM (documented pinout)
-- [ ] Document the device-side update daemon (`imr_controller`, Buildroot Linux 5.10)
-- [ ] Port to open source framework (Zephyr, FreeRTOS) — not possible on stock hardware: secure boot (eFUSE AES + vendor RSA) only launches vendor-signed images, so open firmware requires vendor cooperation or different hardware
-- [ ] QCA2066 / 60 GHz (Wilocity) WiFi driver support
-
 ### Phase 4: Optimizations and fixes
-- [ ] Fix current nofio firmware bugs
+- [ ] Fix current nofio firmware bugs via the runtime patch layer (persistent root, [docs/ROOT_PERSISTENCE.md](docs/ROOT_PERSISTENCE.md)) — e.g. the known "red screen" / audio-drop issues
 - [ ] Latency optimization
 
 ## Contributing
@@ -152,6 +101,7 @@ This project is licensed under the GNU General Public License v3.0 (GPLv3). See 
 - [Sblash/nofio-linux](https://github.com/Sblash/nofio-linux) - Original Linux guide
 - [Buildroot](https://buildroot.org/) - The device OS build system
 - [Xilinx/zynqmpimage (u-boot)](https://github.com/Xilinx/u-boot-xlnx/blob/master/tools/zynqmpimage.h) - ZynqMP boot image format reference
+- [uboot-interupt (sharmaniraj009)](https://github.com/sharmaniraj009/uboot-interupt) - U-Boot autoboot interrupt flood used for serial access
 
 ## Contact
 

@@ -1,5 +1,10 @@
 # Firmware Analysis
 
+> **🗄️ ARCHIVED (2026-11):** this whole `firmware/` directory is kept for
+> reference only — no further work planned. The firmware cannot be decrypted or
+> re-encrypted offline (AES device key in eFUSE/BBRAM + RSA-2048 secure boot);
+> see [docs/BOOT_CHAIN.md](../docs/BOOT_CHAIN.md).
+
 This document contains analysis of the Nofio firmware files.
 
 > **CORRECTION (superseded by [boot_image_format.md](boot_image_format.md)):**
