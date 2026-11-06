@@ -8,6 +8,13 @@ Open source implementation for Nofio wireless VR adapter (Valve Index).
 > firmware images, or third-party proprietary software are distributed in this
 > repository.
 
+## Credits
+[PanicHandler](https://github.com/PanicHandler) - for helping me to decompile and analyze the original utility app
+
+[giampaolo23](https://github.com/giampaolo23) - to collaborate with me on the discovery of Nofio and the development of the open-source utility app 
+
+[MenachemSchmuel](https://github.com/MenachemSchmuel) - for betatesting of the old guide and correction of my (bad) english
+
 ## Project Status
 
 **Current Phase:** 3 - Open-source utility app
