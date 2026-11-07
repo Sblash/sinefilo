@@ -52,7 +52,6 @@ device-specific credentials redacted) in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - [Original Guide](docs/ORIGINAL_README.md) - Original Linux setup guide
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - `firmware/` — 🗄️ **archived** (reference only): BOOT.BIN is a secure-boot ZynqMP image (AES device key in eFUSE/BBRAM + RSA-2048); decrypt/re-encrypt offline is impossible, see [docs/BOOT_CHAIN.md](docs/BOOT_CHAIN.md)
-- `miscellaneous/` — raw material: decompiled utility, extracted rootfs, PCB photos, raw session logs (`mistral-nofio-knowledge/`), analysis notes
 
 ## Phases
 
