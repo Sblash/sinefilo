@@ -1,4 +1,4 @@
-# nofio-linux
+# Sinefilo
 
 Open source implementation for Nofio wireless VR adapter (Valve Index).
 
